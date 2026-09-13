@@ -4273,6 +4273,25 @@ class GatewayRunner(
         # True keeps CLI/unknown paths working; stateless adapters (api_server) declare False.
         _adapter = (getattr(self, "adapters", None) or {}).get(context.source.platform)
         _async_delivery = getattr(_adapter, "supports_async_delivery", True)
+        # Per-channel/thread working directory. A ``channel_overrides[...].cwd`` pins the
+        # logical cwd for this conversation, which is what makes a cwd-anchored ``AGENTS.md``
+        # load for it (the context-file chain resolves off the session cwd). Absent an override
+        # this is "" and every existing path is byte-identical to before.
+        _channel_cwd = ""
+        _config = getattr(self, "config", None)
+        if _config is not None:
+            try:
+                _override = _get_channel_override(
+                    _config,
+                    context.source.platform,
+                    context.source.chat_id or "",
+                    thread_id=getattr(context.source, "thread_id", None),
+                    parent_id=getattr(context.source, "parent_chat_id", None),
+                )
+                _channel_cwd = (_override.cwd or "").strip() if _override else ""
+            except Exception:
+                logger.debug("channel cwd override resolution failed", exc_info=True)
+                _channel_cwd = ""
         return set_session_vars(
             platform=context.source.platform.value,
             chat_id=context.source.chat_id,
@@ -4288,7 +4307,9 @@ class GatewayRunner(
             message_id=str(context.source.message_id) if context.source.message_id else "",
             profile=getattr(context.source, "profile", "") or "",
             async_delivery=_async_delivery,
-            cron_session="")
+            cron_session="",
+            cwd=_channel_cwd,
+        )
 
     def _clear_session_env(self, tokens: list) -> None:
         """Restore session context variables to their pre-handler values."""
